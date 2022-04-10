@@ -1,40 +1,20 @@
 # This is a sample Python script.
+# Medium Blog https://medium.com/swlh/using-python-to-connect-to-stravas-api-and-analyse-your-activities-dummies-guide-5f49727aac86
+
 import requests
 import json
 import ssl
 from configparser import ConfigParser
-
-# Press Umschalt+F10 to execute it or replace it with your code.
-# Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
+import time
+import pandas as pd
 
 config = ConfigParser()
 config.read('config.ini')
-client_id = config['strava']['client_id']
+client_id = eval(config['strava']['client_id'])
 client_secret = config['strava']['client_secret']
-refresh_token = config['strava']['refresh_token']
 url_auth = "https://www.strava.com/oauth/authorize"
 url_token = "https://www.strava.com/oauth/token"
-
-
-def token_exchange():
-    data = {"client_id": client_id,
-            "client_secret": client_secret,
-            "code": "code",
-            "grant_type": "authorization_code"
-            }
-    r = requests.post(url_token, data)
-    print(r)
-
-def token_refresh():
-    data = {"client_id": client_id,
-            "client_secret": client_secret,
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token
-            }
-    r = requests.post(url_token,
-                      data)
-    print(r)
-
+url_activites = "https://www.strava.com/api/v3/activities"
 
 
 def auth():
@@ -48,13 +28,10 @@ def auth():
     r = requests.get(url_auth, data)
     print(r)
 
-def access_strava():
+def update_tokens():
     import requests
     import urllib3
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
-    auth_url = "https://www.strava.com/oauth/token"
-    activites_url = "https://www.strava.com/api/v3/activities"
 
     payload = {
         'client_id': client_id,
@@ -65,34 +42,93 @@ def access_strava():
     }
 
     print("Requesting Token...\n")
-    res = requests.post(auth_url, data=payload, verify=False)
-    access_token = res.json()['access_token']
-    print("Access Token = {}\n".format(access_token))
-
-    header = {'Authorization': 'Bearer ' + access_token}
-    param = {'per_page': 200, 'page': 1}
-    my_dataset = requests.get(activites_url + '?access_token=' + access_token).json()
-
-    print(my_dataset[0]["name"])
-    print(my_dataset[0]["map"]["summary_polyline"])
+    new_strava_tokens = requests.post(url_auth, data=payload, verify=False)
+    with open('strava_tokens.json', 'w') as outfile:
+        json.dump(new_strava_tokens, outfile)
+        print("updated token json file")
+    strava_tokens = new_strava_tokens
+    return strava_tokens
 
 
-# Press the green button in the gutter to run the script.
+def first_auth():
+    # code must be found out manually with this URL:
+    # url = https://www.strava.com/oauth/authorize?client_id=80669&response_type=code&redirect_uri=http://localhost/exchange_token&approval_prompt=force&scope=profile:read_all,activity:read_all
+    code = 'code must be found out manually'
+    response = requests.post(
+        url=url_token,
+        data={
+            'client_id': client_id,
+            'client_secret': client_secret,
+            'code': code,
+            'grant_type': 'authorization_code'
+        }
+    )  # Save json response as a variable
+    strava_tokens = response.json()  # Save tokens to file
+    with open('strava_tokens.json', 'w') as outfile:
+        json.dump(strava_tokens, outfile)  # Open JSON file and print the file contents
+    # to check it's worked properly
+    with open('strava_tokens.json') as check:
+        data = json.load(check)
+        print(data)
+
+
+def get_activities():
+    # Loop through all activities
+    page = 1
+    ## Create the dataframe ready for the API call to store your activity data
+    activities_df = pd.DataFrame(
+        columns=[
+            "id",
+            "name",
+            "kudos_count",
+            "start_date_local",
+            "type",
+            "distance",
+            "moving_time",
+            "elapsed_time",
+            "total_elevation_gain",
+            "end_latlng",
+            "external_id"
+        ]
+    )
+    while True:
+
+        # get page of activities from Strava
+        r = requests.get(url_activites + '?access_token=' + access_token + '&per_page=200' + '&page=' + str(page))
+        r = r.json()  # if no results then exit loop
+        if (not r):
+            break
+
+        # otherwise add new data to dataframe
+        for x in range(len(r)):
+            activities_df.loc[x + (page - 1) * 200, 'id'] = r[x]['id']
+            activities_df.loc[x + (page - 1) * 200, 'name'] = r[x]['name']
+            activities_df.loc[x + (page - 1) * 200, 'kudos_count'] = r[x]['kudos_count']
+            activities_df.loc[x + (page - 1) * 200, 'start_date_local'] = r[x]['start_date_local']
+            activities_df.loc[x + (page - 1) * 200, 'type'] = r[x]['type']
+            activities_df.loc[x + (page - 1) * 200, 'distance'] = r[x]['distance']
+            activities_df.loc[x + (page - 1) * 200, 'moving_time'] = r[x]['moving_time']
+            activities_df.loc[x + (page - 1) * 200, 'elapsed_time'] = r[x]['elapsed_time']
+            activities_df.loc[x + (page - 1) * 200, 'total_elevation_gain'] = r[x]['total_elevation_gain']
+            activities_df.loc[x + (page - 1) * 200, 'end_latlng'] = r[x]['end_latlng']
+            activities_df.loc[x + (page - 1) * 200, 'external_id'] = r[x]['external_id']  # increment page
+        page += 1
+        activities_df.to_csv('strava_activities.csv')
+        print('Strava Activities have been updated')
+        return activities_df
+
+
 if __name__ == '__main__':
+    with open('strava_tokens.json') as tokens:
+        data = json.load(tokens)
 
-    try:
-        _create_unverified_https_context = ssl._create_unverified_context
-    except AttributeError:
-        # Legacy Python that doesn't verify HTTPS certificates by default
-        pass
-    else:
-        # Handle target environment that doesn't support HTTPS verification
-        ssl._create_default_https_context = _create_unverified_https_context
+        ## If access_token has expired then use the refresh_token to get the new access_token
+        if data['expires_at'] < time.time():
+            data = update_tokens()
+        refresh_token = data["refresh_token"]
+        access_token = data["access_token"]
 
-    #access_strava()
-    #s = requests.session()
-    token_exchange()
-    #token_refresh()
-    #auth()
+        activities_df = get_activities()
+        print(activities_df)
 
 
